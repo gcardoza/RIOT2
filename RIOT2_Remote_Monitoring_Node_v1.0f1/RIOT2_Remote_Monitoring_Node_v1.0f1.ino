@@ -1,7 +1,7 @@
 //  Project:  RIOT2 - Remote IOT Node for monitoring Weather - Temperature, Humidity, Barometric Pressure
 //  Author:   Geofrey Cardoza
-//  Baseline: August 31st, 2016  v1.0
-//  Revision: September 3rd, 2016  v1.0d
+//  Baseline: August 31st, 2016
+//  Revision: September 3rd, 2016
 //
 //  Hardware Configuration:
 //    AdaFruit Feather Huzzah with ESP8266 Microcontroller
@@ -11,35 +11,34 @@
 //    Analog (0-1V) Moisture Sensor
 //    Digital input 1 and 2
 
+  const char* Code_Version = "1.0f1";
 
 // ***** Include header files *****
   #include <PubSubClient.h>         // Library for MQTT Pub/Sub functions
-  #include <ESP8266WiFi.h>          // Library for ESP8266 WiFi microcontroller// *?*  #include <stdio.h>
+  #include <ESP8266WiFi.h>          // Library for ESP8266 WiFi microcontroller
   #include "DHT.h"                // Library for DHT22 Temperature and Humidity sensor
   #include <Wire.h>                 // Library for I2C Communication
   #include <SFE_BMP180.h>           // Library for BMP180 Pressure and Temperature sensor
   
 // ***** Declare global variables for the RIOT2 Node
   int   Update_Interval = 20000;           // set default Data Update frequence 20 seconds (BIOT can change it)
-  float Temperature, Humidity, HeatIndex, Pressure;
-  int   Analog1 = 0;
-  char  Digital1 = 0;
-  char  Digital2 = 0;
+  float Temperature, Humidity, HeatIndex, Pressure, Analog_1;
+  char  Digital_1 = 0;
+  char  Digital_2 = 0;
   unsigned long Update_Sequence = 0;      // Update sequence number to base
-    
-// ***** cpu ticks to control calculate main Loop sensor data publishing *****
+
+// ***** Define variables to track how long the program has been running *****
   long Current_Time;
   long Last_Publish_Time = 0;
-      
-// WiFi & Server Info
+
+// ***** WiFi & Server Info *****
   #define MQTT_Server "192.168.0.23"
   const char* ssid = "Excal-AS-RC";
   const char* WiFi_Password = "6677889900";
   const char* Node_Type = "RIOT2";
-  const char* Code_Version = " 1.0d";
   String Node_Id = "RIOT2-";
 
-// MQTT pub/sub service info
+// ***** MQTT pub/sub service info *****
   const char* Sensor_Topic = "/RIOT2/SensorData";
   const char* Config_Topic = "/RIOT2/Config";
   WiFiClient espClient;
@@ -59,7 +58,6 @@
   #define Analog1_Pin  1  // Analog input 1 pin
   #define Digital1_Pin 0 // Digital input 1 pin
   #define Digital2_Pin 2  // Digital input 2 pin
-
 
 
 // ********** INITIALIZE ALL COMPONENTS OF THE SYSTEM **********
@@ -110,84 +108,16 @@ void setup(void)
 // ********** MAIN PROGRAM LOOP **********
 void loop()
 {
-  // ***** Define variables *****
-  String Sensor_Data;   // Data buffer for message to BIOT Base
-  char buffer[150], TE_b[10], HU_b[10], HI_b[10], PR_b[10], A1_b[10], SE_b[10]; //*?*
-  
   Serial.println("\n***** ENTERING MAIN PROGRAM LOOP *****");
   
-  // ***** Get Temperature & Humidity from DHT22 sensor and store in Global Vars *****
-  Serial.print("-> DHT22: Reading Temperature and Humidity");
+  // ***** Read Sensors and Store Data in Global variables *****
   read_DHT22();
-  
-  // ***** Get Pressure and Temperature from BMP180 module and store in Global Vars *****
-  Serial.println("-> BMP180: Reading Temperature and Pressure");
   read_BMP180();
+  read_Analog_Digital();    
+
+  // ***** Format Sensor Data Payload and send to BIOT Base
+  Publish_Sensor_Data();
     
-  // ***** Get Analog and Digital Input Readings from microcontroller and store in Global Vars *****
-  Serial.println("-> Reading Analog & Digital Inputs");
-  Analog1 = analogRead(Analog1_Pin);   // Moisture reading in 10 bit resolution. 5V = 1023
- 
-  if(digitalRead(Digital1_Pin) == HIGH) Digital1 = '1';
-  else Digital1 = '0';
-  
-  if(digitalRead(Digital2_Pin) == HIGH) Digital2 = '1';
-  else Digital2 = '0';
-  
-  Serial.print("  -> Analog1: ");
-  Serial.print(Analog1);
-  Serial.print(" Digital1: ");
-  Serial.print(Digital1);
-  Serial.print(" Digital2: ");
-  Serial.println(Digital2);  
-  
-  // ***** Format RIOT2 Sensor Data message for BIOT2 Base Station *****
-
-  // Convert floating point vars into character strings
-  dtostrf(Temperature, 5, 1, TE_b);
-  dtostrf(Humidity, 5, 1, HU_b);
-  dtostrf(HeatIndex, 5, 1, HI_b);
-  dtostrf(Pressure, 5, 1, PR_b);
-  sprintf(A1_b,"%5i", Analog1);
-  dtostrf(Update_Sequence, 6, 0, SE_b);
-         
-  Sensor_Data = Node_Id;
-  Sensor_Data += ", SW:";
-  Sensor_Data += Code_Version;
-  Sensor_Data += ", TE:";
-  Sensor_Data += TE_b;
-  Sensor_Data += ", HU:";
-  Sensor_Data += HU_b;
-  Sensor_Data += ", HI:";
-  Sensor_Data += HI_b;
-  Sensor_Data += ", PR:";
-  Sensor_Data += PR_b;
-  Sensor_Data += ", A1:";
-  Sensor_Data += A1_b;
-  Sensor_Data += ", D1:";
-  Sensor_Data += Digital1;  
-  Sensor_Data += ", D2:";
-  Sensor_Data += Digital2; 
-  Sensor_Data += ", SE:";
-  Sensor_Data += SE_b;
-
-  // Ensure a connection exists with the MQTT server on the Pi
-  Serial.print("-> Checking connection to MQTT server...");
-  if (!client.connected()) reconnect();
-  else Serial.println("connected");
-  
-  // Publish Sensor Data to MQTT message queue
-  strcpy(buffer, Sensor_Data.c_str());
-  Serial.println("-> Sending Sensor Data to MQTT queue");
-  Serial.println(Sensor_Data);
-  
-  client.publish(Sensor_Topic, buffer);
-  
-  // Update Record Sequence
-  Update_Sequence++;
-  if (Update_Sequence > 999999)
-    Update_Sequence = 0;
-  
   // Wait update interval prior to sending next update
   delay(Update_Interval);
 }
@@ -197,6 +127,8 @@ void loop()
 //  ***** Read the Temperature and Humidity from the DHT22 sensor over a serial digital I/O port *****
 int read_DHT22()
 {
+  Serial.print("-> DHT22: Reading Temperature and Humidity");
+  
   // Note Reading temperature or humidity takes between .25 - 2 seconds
   Humidity = dht.readHumidity();        // Relative Humidity in %
   Temperature = dht.readTemperature();  // Temp in Celcius, for Fahrenheit use dht.readTemperature(true)
@@ -234,6 +166,8 @@ int read_BMP180()
   char status;
   double T,P,p0,a;
 
+  Serial.println("-> BMP180: Reading Temperature and Pressure");
+  
   status = myBMP180.startTemperature();
   if (status != 0)
   {
@@ -282,6 +216,27 @@ int read_BMP180()
     Pressure = 999;
     return(-1);
   }
+}
+
+// ***** Get Analog and Digital Input Readings from microcontroller and store in Global Vars *****
+void read_Analog_Digital()
+{
+  Serial.println("-> Reading Analog & Digital Inputs");
+
+  Analog_1 = analogRead(Analog1_Pin);   // A?D 1 reading in 10 bit resolution. 1V = 1023
+ 
+  if(digitalRead(Digital1_Pin) == HIGH) Digital_1 = '1';
+  else Digital_1 = '0';
+  
+  if(digitalRead(Digital2_Pin) == HIGH) Digital_2 = '1';
+  else Digital_2 = '0';
+  
+  Serial.print("  -> Analog1: ");
+  Serial.print(Analog_1);
+  Serial.print(" Digital1: ");
+  Serial.print(Digital_1);
+  Serial.print(" Digital2: ");
+  Serial.println(Digital_2);
 }
 
 // ***** Connect to the WiFi Network and establish Node Name *****
@@ -378,5 +333,60 @@ String macToStr(const uint8_t* mac)
     }
   }
   return result;
+}
+
+// ***** Format RIOT2 Sensor Data message for BIOT2 Base Station *****
+void Publish_Sensor_Data()
+{
+
+  // ***** Define variables *****
+  String Sensor_Data;   // Data buffer for message to BIOT Base
+  char buffer[150], TE_b[10], HU_b[10], HI_b[10], PR_b[10], A1_b[10], SE_b[10]; //*?*
+
+  // Convert floating point vars into character strings
+  dtostrf(Temperature, 5, 1, TE_b);
+  dtostrf(Humidity, 5, 1, HU_b);
+  dtostrf(HeatIndex, 5, 1, HI_b);
+  dtostrf(Pressure, 5, 1, PR_b);
+  // *?* dtostrf(Analog_1, 5, 1, A1_b);
+  sprintf(A1_b,"5i", Analog_1);
+  dtostrf(Update_Sequence, 6, 0, SE_b);
+         
+  Sensor_Data = Node_Id;
+  Sensor_Data += ", SW:";
+  Sensor_Data += Code_Version;
+  Sensor_Data += ", TE:";
+  Sensor_Data += TE_b;
+  Sensor_Data += ", HU:";
+  Sensor_Data += HU_b;
+  Sensor_Data += ", HI:";
+  Sensor_Data += HI_b;
+  Sensor_Data += ", PR:";
+  Sensor_Data += PR_b;
+  Sensor_Data += ", A1:";
+  Sensor_Data += A1_b;
+  Sensor_Data += ", D1:";
+  Sensor_Data += Digital_1;  
+  Sensor_Data += ", D2:";
+  Sensor_Data += Digital_2; 
+  Sensor_Data += ", SE:";
+  Sensor_Data += SE_b;
+
+  // Ensure a connection exists with the MQTT server on the Pi
+  Serial.print("-> Checking connection to MQTT server...");
+  if (!client.connected()) reconnect();
+  else Serial.println("connected");
+  
+  // Publish Sensor Data to MQTT message queue
+  strcpy(buffer, Sensor_Data.c_str());
+  Serial.println("-> Sending Sensor Data to MQTT queue");
+  Serial.println(Sensor_Data);
+  
+  client.publish(Sensor_Topic, buffer);
+  
+  // Update Record Sequence
+  Update_Sequence++;
+  if (Update_Sequence > 999999)
+    Update_Sequence = 0; 
 }
 
