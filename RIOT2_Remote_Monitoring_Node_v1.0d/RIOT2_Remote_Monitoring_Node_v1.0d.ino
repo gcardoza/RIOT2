@@ -1,14 +1,15 @@
 //  Project:  RIOT2 - Remote IOT Node for monitoring Weather - Temperature, Humidity, Barometric Pressure
 //  Author:   Geofrey Cardoza
 //  Baseline: August 31st, 2016  v1.0
-//  Revision: September 2nd, 2016  v1.0
+//  Revision: September 3rd, 2016  v1.0d
 //
 //  Hardware Configuration:
 //    AdaFruit Feather Huzzah with ESP8266 Microcontroller
 //      - WiFi & MQTT messaging interface
 //    DHT22 for Temperature and Pressure
-//    BMP180 for Pressure and Temperature
+//    BMP180 for Pressure
 //    Analog (0-1V) Moisture Sensor
+//    Digital input 1 and 2
 
 
 // ***** Include header files *****
@@ -19,9 +20,13 @@
   #include <SFE_BMP180.h>           // Library for BMP180 Pressure and Temperature sensor
   
 // ***** Declare global variables for the RIOT2 Node
-  int Update_Interval = 20000;           // set Data Update frequence default to 20 seconds (BIOT2 can change it)
+  int   Update_Interval = 20000;           // set default Data Update frequence 20 seconds (BIOT can change it)
+  float Temperature, Humidity, HeatIndex, Pressure;
+  int   Analog1 = 0;
+  char  Digital1 = 0;
+  char  Digital2 = 0;
   unsigned long Update_Sequence = 0;      // Update sequence number to base
-
+    
 // WiFi & Server Info
   #define MQTT_Server "192.168.0.23"
   const char* ssid = "Excal-AS-RC";
@@ -30,10 +35,9 @@
   const char* Code_Version = " 1.0d";
   String Node_Id = "RIOT2-";
 
-// MQTT service info
-  char* Sensor_Topic = "/RIOT2/SensorData";
-  char* Config_Topic = "/RIOT2/Config";
-
+// MQTT pub/sub service info
+  const char* Sensor_Topic = "/RIOT2/SensorData";
+  const char* Config_Topic = "/RIOT2/Config";
   WiFiClient espClient;
   PubSubClient client(espClient);
 
@@ -41,19 +45,17 @@
   #define DHT_Type DHT22   // DHT 22  (AM2302), AM2321
   #define DHT22_Pin 2     // The digital IO pin the DHT22 is connected to
   DHT dht(DHT22_Pin, DHT_Type);
-  float DHT22_Temperature, DHT22_Humidity, DHT22_HeatIndex;
+
   
 // ***** Set BMP180 Pressure Sensor Variables *****
-  SFE_BMP180 myBMP180;
   #define ALTITUDE 260.0 // Altitude at Home - 4 Peace Court Caledon ON, Canada
-  float BMP180_Pressure, BMP180_Temperature;
-
+  SFE_BMP180 myBMP180;
+  
 // ***** Set Analog and Digital Input Variables *****
   #define Analog1_Pin  1  // Analog input 1 pin
-  #define Digital1_Pin  0 // Digital input 1 pin
+  #define Digital1_Pin 0 // Digital input 1 pin
   #define Digital2_Pin 2  // Digital input 2 pin
-  float Analog1;
-  , Digital1, Digital 2;
+
 
 
 // ********** INITIALIZE ALL COMPONENTS OF THE SYSTEM **********
@@ -64,8 +66,8 @@ void setup(void)
   delay (1000); //Pause to allow serial port to initialize
   Serial.print("\n***** STARTING RIOT2 - Code Version: ");
   Serial.print(Code_Version);
-  Serial.print(" *****\n");
-  Serial.print("\n***** ENTERING SETUP MODE *****\n");
+  Serial.println(" *****");
+  Serial.println("\n***** ENTERING SETUP MODE *****");
 
   // ***** Start WiFi Communication Subsystem *****
   Serial.print("-> Connecting to WiFi Network\n");
@@ -92,8 +94,8 @@ void setup(void)
 
   // ***** Configure Onboard LED and set to Off *****
   Serial.print("-> Analog & Digital Input: Configuring A/D and GPIO ports\n");
-  pinMode(Digital1_Pin, INPUT_PULLUP);
-  pinMode(Digital2_Pin, INPUT_PULLUP);
+  pinMode(Digital1_Pin, INPUT);
+  pinMode(Digital2_Pin, INPUT);
   
   //Wait a bit before starting the main loop
   delay(2000);
@@ -107,7 +109,7 @@ void loop()
   String Sensor_Data;   // Data buffer for message to BIOT Base
   char buffer[150], TE_b[10], HU_b[10], HI_b[10], PR_b[10], A1_b[10], SE_b[10]; //*?*
   
-  Serial.print("\n***** ENTERING MAIN PROGRAM LOOP *****\n");
+  Serial.println("\n***** ENTERING MAIN PROGRAM LOOP *****");
   
   // ***** Get Temperature & Humidity from DHT22 sensor and store in Global Vars *****
   Serial.print("-> DHT22: Reading Temperature and Humidity");
@@ -117,15 +119,15 @@ void loop()
   Serial.println("-> BMP180: Reading Temperature and Pressure");
   read_BMP180();
     
-  // ***** 4. Get Analog and Digital Input Readings from microcontroller and store in Global Vars *****
+  // ***** Get Analog and Digital Input Readings from microcontroller and store in Global Vars *****
   Serial.println("-> Reading Analog & Digital Inputs");
   Analog1 = analogRead(Analog1_Pin);   // Moisture reading in 10 bit resolution. 5V = 1023
  
-  if(digitalRead(Digital1_Pin) == HIGH) Digital1 = 1;
-  else Digital1 = 0;
+  if(digitalRead(Digital1_Pin) == HIGH) Digital1 = '1';
+  else Digital1 = '0';
   
-  if(digitalRead(Digital2_Pin) == HIGH) Digital2 = 1;
-  else Digital2 = 0;
+  if(digitalRead(Digital2_Pin) == HIGH) Digital2 = '1';
+  else Digital2 = '0';
   
   Serial.print("  -> Analog1: ");
   Serial.print(Analog1);
@@ -134,32 +136,33 @@ void loop()
   Serial.print(" Digital2: ");
   Serial.println(Digital2);  
   
-  // Format RIOT2 Sensor Data message for BIOT2 Base Station
+  // ***** Format RIOT2 Sensor Data message for BIOT2 Base Station *****
 
-  dtostrf(DHT22_Temperature, 5, 1, DT_b);
-  dtostrf(DHT22_Humidity, 5, 1, DH_b);
-  dtostrf(DHT22_HeatIndex, 5, 1, DI_b);
-  dtostrf(BMP180_Pressure, 5, 1, BP_b);
-  dtostrf(Moisture_p, 3, 0, M1_b);
+  // Convert floating point vars into character strings
+  dtostrf(Temperature, 5, 1, TE_b);
+  dtostrf(Humidity, 5, 1, HU_b);
+  dtostrf(HeatIndex, 5, 1, HI_b);
+  dtostrf(Pressure, 5, 1, PR_b);
+  sprintf(A1_b,"5i", Analog1);
   dtostrf(Update_Sequence, 6, 0, SE_b);
          
   Sensor_Data = Node_Id;
   Sensor_Data += ", SW:";
   Sensor_Data += Code_Version;
   Sensor_Data += ", TE:";
-  Sensor_Data += DT_b;
+  Sensor_Data += TE_b;
   Sensor_Data += ", HU:";
-  Sensor_Data += DH_b;
+  Sensor_Data += HU_b;
   Sensor_Data += ", HI:";
-  Sensor_Data += DI_b;
+  Sensor_Data += HI_b;
   Sensor_Data += ", PR:";
-  Sensor_Data += BP_b;
+  Sensor_Data += PR_b;
   Sensor_Data += ", A1:";
-  Sensor_Data += M1_b;
+  Sensor_Data += A1_b;
   Sensor_Data += ", D1:";
-  Sensor_Data += M1_b;  
+  Sensor_Data += Digital1;  
   Sensor_Data += ", D2:";
-  Sensor_Data += M1_b; 
+  Sensor_Data += Digital2; 
   Sensor_Data += ", SE:";
   Sensor_Data += SE_b;
 
@@ -190,33 +193,32 @@ void loop()
 int read_DHT22()
 {
   // Note Reading temperature or humidity takes between .25 - 2 seconds
-  DHT22_Humidity = dht.readHumidity();      // Relative Humidity in %
-  DHT22_Temperature = dht.readTemperature();  // Temperature in Celcius
-                                            // For Fahrenheit use dht.readTemperature(true)
+  Humidity = dht.readHumidity();        // Relative Humidity in %
+  Temperature = dht.readTemperature();  // Temp in Celcius, for Fahrenheit use dht.readTemperature(true)
 
   // Check if DHT22 reads failed and exit
-  if (isnan(DHT22_Humidity) || isnan(DHT22_Temperature))
+  if (isnan(Humidity) || isnan(Temperature))  // isnan = is not a number
   {
     Serial.println("  -> Failed to read from DHT22 sensor!");
     //Set the failed read values for the readings
-    DHT22_Humidity = 0;
-    DHT22_Temperature = 0;
-    DHT22_HeatIndex = 0;
+    Humidity = 999;
+    Temperature = 999;
+    HeatIndex = 999;
     return(-1);
   }
 
   // Calculate heat index in Celsius (isFahreheit = false)
-  DHT22_HeatIndex = dht.computeHeatIndex(DHT22_Temperature, DHT22_Humidity, false);
+  HeatIndex = dht.computeHeatIndex(Temperature, Humidity, false);
 
   Serial.println("  -> DHT22 Read successful");
   Serial.print("  -> Temperature: ");
-  Serial.print(DHT22_Temperature);
+  Serial.print(Temperature);
   Serial.print(" *C, ");
   Serial.print("Humidity: ");
-  Serial.print(DHT22_Humidity);
+  Serial.print(Humidity);
   Serial.print(" %, ");
   Serial.print("Heat index: ");
-  Serial.print(DHT22_HeatIndex);
+  Serial.print(HeatIndex);
   Serial.println(" *C ");
   return(0);
 }
@@ -234,7 +236,6 @@ int read_BMP180()
     status = myBMP180.getTemperature(T);
     if (status != 0)
     { 
-      BMP180_Temperature = T;
       status = myBMP180.startPressure(3);
       if (status != 0)
       {
@@ -242,36 +243,38 @@ int read_BMP180()
         status = myBMP180.getPressure(P,T);
         if (status != 0)
         {
-          BMP180_Pressure = myBMP180.sealevel(P,ALTITUDE)/10;  //Convert Pressure to kPa
+          Pressure = myBMP180.sealevel(P,ALTITUDE)/10;  //Convert Pressure to kPa
 
-          Serial.print("  -> Temperature: ");
-          Serial.print(BMP180_Temperature);
-          Serial.print(" *C, Barometric Pressure: ");
-          Serial.print(BMP180_Pressure);
+          Serial.print("Barometric Pressure: ");
+          Serial.print(Pressure);
           Serial.println(" kPa");
           return(0);
         }
         else
         {
           Serial.print(F("  -> BMP180: ERROR Starting Pressure Measurement"));
+          Pressure = 999;
           return(-4);
         }
       }
       else
       {
         Serial.print(F("  -> BMP180: ERROR Starting Pressure Measurement"));
+        Pressure = 999;
         return(-3);
       }
     }
     else
     { 
       Serial.print(F("  -> BMP180: ERROR Reading Temperature"));
+      Pressure = 999;
       return(-2);
     }
   }
   else
   {  
     Serial.println(F("  -> BMP180: ERROR Starting Temperature Measurement"));
+    Pressure = 999;
     return(-1);
   }
 }
