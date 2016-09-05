@@ -11,7 +11,7 @@
 //    Analog (0-1V) Moisture Sensor
 //    Digital input 1 and 2
 
-  const char* Code_Version = " 1.0h";
+  const char* Code_Version = " 1.0i";
 
 // ***** Include header files *****
   #include <PubSubClient.h>         // Library for MQTT Pub/Sub functions
@@ -19,10 +19,12 @@
   #include "DHT.h"                // Library for DHT22 Temperature and Humidity sensor
   #include <Wire.h>                 // Library for I2C Communication
   #include <SFE_BMP180.h>           // Library for BMP180 Pressure and Temperature sensor
+  #include <Adafruit_Sensor.h>
+  #include <Adafruit_BME280.h>
   
 // ***** Declare global variables for the RIOT2 Node
   int   Update_Interval = 10000;           // set default Data Update frequence 20 seconds (BIOT can change it)
-  float Temperature, Humidity, HeatIndex, Pressure, Analog_1;
+  float Temperature, Humidity, Pressure, Analog_1;
   float  Digital_1, Digital_2;
   unsigned long Update_Sequence = 0;      // Update sequence number to base
   char Sensor_Data[150];                  // Buffer to hold formatted sensor data payload
@@ -44,16 +46,20 @@
   WiFiClient espClient;
   PubSubClient client(espClient);
 
+// ***** Set BME280 Temperature, Humidity and Pressure Variables *****
+  #define SEALEVELPRESSURE_HPA (1013.25)
+  Adafruit_BME280 bme; // I2C
+  boolean BME280_Present = true;  // set the default to the board being present
+  
 // ***** Set DHT22 Temp and Pressure Variables *****
   #define DHT_Type DHT22   // DHT 22  (AM2302), AM2321
   #define DHT22_Pin 2     // The digital IO pin the DHT22 is connected to
   DHT dht(DHT22_Pin, DHT_Type);
-
   
 // ***** Set BMP180 Pressure Sensor Variables *****
   #define ALTITUDE 260.0 // Altitude at Home - 4 Peace Court Caledon ON, Canada
   SFE_BMP180 myBMP180;
-  
+
 // ***** Set Analog and Digital Input Variables *****
   #define Analog1_Pin  0    // Analog input 1 pin
   #define Digital1_Pin 12   // Digital input 1 pin
@@ -86,14 +92,25 @@ void setup(void)
   pinMode(BUILTIN_LED, OUTPUT);
   digitalWrite(BUILTIN_LED, HIGH);  // Turn the LED off by making the voltage HIGH
   
-  // ***** Initialize DHT22 Temperature and Humidity sensor *****
-  Serial.print("-> DHT22: Starting Temperature & Humidity Sensor\n");
-  dht.begin();
+  // ***** Check for BME280 Presence and if found Initialize it *****
+  Serial.print("-> BME280: Starting Temperature, Humidity and Pressure Sensor\n");
+  if (!bme.begin())
+  {
+    BME280_Present = false;
+    Serial.println("  -> BME280: Could not find sensor. Using DHT22 & BMP180.");
+  }
 
-  // ***** Initialize BMP180 Pressure sensor *****
-  Serial.print(F("-> BMP180: Starting Pressure and Temperature Sensor "));
-  myBMP180.begin();
-  Serial.print(F("\n"));
+  if(!BME280_Present)
+  {
+    // ***** Initialize DHT22 Temperature and Humidity sensor *****
+    Serial.print("-> DHT22: Starting Temperature & Humidity Sensor\n");
+    dht.begin();
+
+    // ***** Initialize BMP180 Pressure sensor *****
+    Serial.print(F("-> BMP180: Starting Pressure and Temperature Sensor "));
+    myBMP180.begin();
+    Serial.print(F("\n"));    
+  }
 
   // ***** Configure Onboard LED and set to Off *****
   Serial.print("-> Analog & Digital Input: Configuring A/D and GPIO ports\n");
@@ -116,8 +133,15 @@ void loop()
     Last_Publish_Time = Current_Time;   // Reste last publish time
 
     // ***** Read Sensors and Store Data in Global variables *****
-    read_DHT22();
-    read_BMP180();
+    if(BME280_Present)
+    {
+      read_BME280();
+    }
+    else
+    {
+      read_DHT22();
+      read_BMP180();     
+    }
     read_Analog_Digital();    
 
     // ***** Format Sensor Data Payload and send to BIOT Base
@@ -126,6 +150,29 @@ void loop()
 }
 
 // *************** Sub-Routines *********************
+
+//  ***** Read the Temperature, Humidity and Pressure from the BME280 over I2C *****
+int read_BME280()
+{
+  Serial.print("-> BME280: Reading Temperature, Humidity, and Pressure");
+
+  Temperature = bme.readTemperature();
+  Serial.print("  -> Temperature = ");
+  Serial.print(Temperature);
+  Serial.print(" *C, ");
+
+  Humidity = bme.readHumidity();
+  Serial.print("Humidity = ");
+  Serial.print(Humidity);
+  Serial.print(" %, ");
+  
+  Pressure = bme.readPressure() / 10.0F;  // Convert to kPa
+  Serial.print("Pressure = ");
+  Serial.print(Pressure);
+  Serial.println(" kPa");
+
+  return(0);
+}
 
 //  ***** Read the Temperature and Humidity from the DHT22 sensor over a serial digital I/O port *****
 int read_DHT22()
@@ -143,12 +190,8 @@ int read_DHT22()
     //Set the failed read values for the readings
     Humidity = 999;
     Temperature = 999;
-    HeatIndex = 999;
     return(-1);
   }
-
-  // Calculate heat index in Celsius (isFahreheit = false)
-  HeatIndex = dht.computeHeatIndex(Temperature, Humidity, false);
 
   Serial.println("  -> DHT22 Read successful");
   Serial.print("  -> Temperature: ");
@@ -157,9 +200,6 @@ int read_DHT22()
   Serial.print("Humidity: ");
   Serial.print(Humidity);
   Serial.print(" %, ");
-  Serial.print("Heat index: ");
-  Serial.print(HeatIndex);
-  Serial.println(" *C ");
   return(0);
 }
 
@@ -258,14 +298,13 @@ void setup_wifi()
     delay(1000);
     Serial.print(".");
   }
-  Serial.println("");
+  Serial.println("Connected");
   
   // Create Node ID = Node_Type-MAC Address
   uint8_t mac[6];
   WiFi.macAddress(mac);
   Node_Id += macToStr(mac);
 
-  Serial.println("  -> WiFi connected");
   Serial.print("  -> IP address: ");
   Serial.println(WiFi.localIP());
   Serial.print("  -> Node ID: ");
@@ -342,12 +381,11 @@ String macToStr(const uint8_t* mac)
 void Publish_Sensor_Data()
 {
   // ***** Define variables *****
-  char TE_b[10], HU_b[10], HI_b[10], PR_b[10], A1_b[10], D1_b[10], D2_b[10], SE_b[10];
+  char TE_b[10], HU_b[10], PR_b[10], A1_b[10], D1_b[10], D2_b[10], SE_b[10];
 
   // Convert floating point vars into character strings
   dtostrf(Temperature, 5, 1, TE_b);
   dtostrf(Humidity, 5, 1, HU_b);
-  dtostrf(HeatIndex, 5, 1, HI_b);
   dtostrf(Pressure, 5, 1, PR_b);
   dtostrf(Analog_1, 4, 0, A1_b);
   dtostrf(Digital_1, 1, 0, D1_b);
@@ -362,8 +400,6 @@ void Publish_Sensor_Data()
   strncat(Sensor_Data, TE_b, 5);
   strcat(Sensor_Data, ",HU,");
   strncat(Sensor_Data, HU_b, 5);
-  strcat(Sensor_Data, ",HI,");
-  strncat(Sensor_Data, HI_b, 5);
   strcat(Sensor_Data,  ",PR,");
   strncat(Sensor_Data, PR_b, 5);
   strcat(Sensor_Data, ",A1,");
