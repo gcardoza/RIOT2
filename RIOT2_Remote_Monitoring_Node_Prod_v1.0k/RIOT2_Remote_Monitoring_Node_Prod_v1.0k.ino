@@ -48,7 +48,9 @@
 
 // ***** Set BME280 Temperature, Humidity and Pressure Variables *****
   #define SEALEVELPRESSURE_HPA (1013.25)
-  Adafruit_BME280 bme; // I2C
+  float My_Altitude = 317;        // This is our home altitude in meters. To compensate pressure
+  float Correction_Factor;        // Var to adjust altitude correction factor for pressure
+  Adafruit_BME280 bme;            // I2C
   boolean BME280_Present = true;  // set the default to the board being present
   
 // ***** Set DHT22 Temp and Pressure Variables *****
@@ -59,7 +61,7 @@
 // ***** Set BMP180 Pressure Sensor Variables *****
   #define ALTITUDE 260.0 // Altitude at Home - 4 Peace Court Caledon ON, Canada
   SFE_BMP180 myBMP180;
-
+ 
 // ***** Set Analog and Digital Input Variables *****
   #define Analog1_Pin  0    // Analog input 1 pin
   #define Digital1_Pin 12   // Digital input 1 pin
@@ -84,6 +86,8 @@ void setup(void)
   // ***** Configure & Start MQTT Messaging service *****
   Serial.println("-> MQTT: Configuring Messaging Service");
   client.setServer(MQTT_Server, 1883); // Connect to MQTT Server
+  Serial.print("  -> Server Address: ");
+  Serial.println(MQTT_Server);
   client.setCallback(callback);        // Set the callback function when subscribed message arrives 
   client.subscribe(Config_Topic);      // Subscribe to Config Topic
         
@@ -99,6 +103,9 @@ void setup(void)
     BME280_Present = false;
     Serial.println("  -> BME280: Could not find sensor. Using DHT22 & BMP180.");
   }
+  Correction_Factor = (760-(My_Altitude*3.281*0.026))/760;  // Corrects Pressure to Sea Level
+  Serial.print("  -> Pressure Correction Factor = ");
+  Serial.println(Correction_Factor);
 
   if(!BME280_Present)
   {
@@ -157,7 +164,7 @@ int read_BME280()
   Serial.println("-> BME280: Reading Temperature, Humidity, and Pressure");
 
   Temperature = bme.readTemperature();
-  Pressure = bme.readPressure()/1000.0F;  // Convert to kPa
+  Pressure = bme.readPressure()/(1000.0*Correction_Factor);  // Correct & convert to kPa
   Humidity = bme.readHumidity();
   
   Serial.print("  -> Temperature = ");
@@ -228,7 +235,8 @@ int read_BMP180()
         status = myBMP180.getPressure(P,T);
         if (status != 0)
         {
-          Pressure = myBMP180.sealevel(P,ALTITUDE)/10;  //Convert Pressure to kPa
+          //Correct pressure to sea level & convert to kPa
+          Pressure = myBMP180.sealevel(P,ALTITUDE)/10;
 
           Serial.print("Barometric Pressure: ");
           Serial.print(Pressure);
@@ -288,7 +296,6 @@ void read_Analog_Digital()
 // ***** Connect to the WiFi Network and establish Node Name *****
 void setup_wifi()
 {
-  char temp_b[50];  // *?* temporary buffer for mac address 
   uint8_t mac[6];
     
   delay(10);
@@ -308,17 +315,8 @@ void setup_wifi()
   
   // Create Node ID = Node_Type-MAC Address
   WiFi.macAddress(mac);
-  sprintf(temp_b, "%5s-%02x:%02x:%02x:%02x:%02x:%02x",Node_Type, mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-  Serial.println(temp_b);
-  
-  strcpy(Node_Id, Node_Type);
-  strcat(Node_Id, "-");
-  for (int i = 0; i < 6; ++i) 
-  {
-    if (i<5) sprintf(temp_b, "%02x:", mac[i]);
-    else  sprintf(temp_b, "%02x", mac[i]);
-    strcat(Node_Id, temp_b);
-  }
+  sprintf(Node_Id, "%5s-%02x:%02x:%02x:%02x:%02x:%02x",Node_Type, mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+
   Serial.print("  -> IP address: ");
   Serial.println(WiFi.localIP());
   Serial.print("  -> Node ID: ");
