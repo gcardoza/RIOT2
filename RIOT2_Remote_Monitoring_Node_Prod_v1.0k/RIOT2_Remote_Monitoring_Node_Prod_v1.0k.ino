@@ -1,17 +1,17 @@
 //  Project:  RIOT2 - Remote IOT Node for monitoring Weather - Temperature, Humidity, Barometric Pressure
 //  Author:   Geofrey Cardoza
 //  Baseline: August 31st, 2016
-//  Revision: September 3rd, 2016
+//  Revision: September 9th, 2016
 //
 //  Hardware Configuration:
-//    AdaFruit Feather Huzzah with ESP8266 Microcontroller
+//    AdaFruit Feather Huzzah with ESP8266 Micro-controller
 //      - WiFi & MQTT messaging interface
 //    DHT22 for Temperature and Pressure
 //    BMP180 for Pressure
 //    Analog (0-1V) Moisture Sensor
 //    Digital input 1 and 2
 
-  const char* Code_Version = " 1.0j";
+  const char* Code_Version = " 1.0k";
 
 // ***** Include header files *****
   #include <PubSubClient.h>         // Library for MQTT Pub/Sub functions
@@ -24,7 +24,7 @@
   
 // ***** Declare global variables for the RIOT2 Node
   int   Update_Interval = 10000;           // set default Data Update frequence 20 seconds (BIOT can change it)
-  float Temperature, Humidity, Pressure, Analog_1;
+  float Temperature, Humidity, Pressure, Altitude, Analog_1;
   float  Digital_1, Digital_2;
   unsigned long Update_Sequence = 0;      // Update sequence number to base
   char Sensor_Data[150];                  // Buffer to hold formatted sensor data payload
@@ -48,8 +48,6 @@
 
 // ***** Set BME280 Temperature, Humidity and Pressure Variables *****
   #define SEALEVELPRESSURE_HPA (1013.25)
-  float My_Altitude = 317;        // This is our home altitude in meters. To compensate pressure
-  float Correction_Factor;        // Var to adjust altitude correction factor for pressure
   Adafruit_BME280 bme;            // I2C
   boolean BME280_Present = true;  // set the default to the board being present
   
@@ -103,9 +101,6 @@ void setup(void)
     BME280_Present = false;
     Serial.println("  -> BME280: Could not find sensor. Using DHT22 & BMP180.");
   }
-  Correction_Factor = (760-(My_Altitude*3.281*0.026))/760;  // Corrects Pressure to Sea Level
-  Serial.print("  -> Pressure Correction Factor = ");
-  Serial.println(Correction_Factor);
 
   if(!BME280_Present)
   {
@@ -161,26 +156,28 @@ void loop()
 //  ***** Read the Temperature, Humidity and Pressure from the BME280 over I2C *****
 int read_BME280()
 {
+  float P, Correction_Factor;        // Var to adjust altitude correction factor for pressure
   Serial.println("-> BME280: Reading Temperature, Humidity, and Pressure");
 
   Temperature = bme.readTemperature();
-  Pressure = bme.readPressure()/(1000.0*Correction_Factor);  // Correct & convert to kPa
+  P = bme.readPressure()/(1000.0);                  // Convert to kPa
   Humidity = bme.readHumidity();
+  Altitude = bme.readAltitude(SEALEVELPRESSURE_HPA);
+ 
+  // Correct Pressure based on current altitude read bythe BME280
+  Correction_Factor = (760-(Altitude*3.281*0.026))/760;  // Corrects Pressure to Sea Level
+  Pressure = P/Correction_Factor;
   
-  Serial.print("  -> Temperature = ");
+  Serial.print("  -> Temp = ");
   Serial.print(Temperature);
-  Serial.print(" *C, ");
-
-
-  Serial.print("Humidity = ");
+  Serial.print(" *C, Hum = ");
   Serial.print(Humidity);
-  Serial.print(" %, ");
-  
-
-  Serial.print("Pressure = ");
+  Serial.print(" %, Pres = ");
   Serial.print(Pressure);
-  Serial.println(" kPa");
-
+  Serial.print(" kPa, Alt = ");
+  Serial.print(Altitude);
+  Serial.print(" m, Correction Factor = ");
+  Serial.println(Correction_Factor);
   return(0);
 }
 
@@ -317,7 +314,7 @@ void setup_wifi()
   WiFi.macAddress(mac);
   sprintf(Node_Id, "%5s-%02x:%02x:%02x:%02x:%02x:%02x",Node_Type, mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
 
-  Serial.print("  -> IP address: ");
+  Serial.print("  -> Node IP: ");
   Serial.println(WiFi.localIP());
   Serial.print("  -> Node ID: ");
   Serial.println(Node_Id);
