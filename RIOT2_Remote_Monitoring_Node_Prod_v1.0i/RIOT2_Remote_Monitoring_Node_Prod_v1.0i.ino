@@ -16,7 +16,7 @@
 // ***** Include header files *****
   #include <PubSubClient.h>         // Library for MQTT Pub/Sub functions
   #include <ESP8266WiFi.h>          // Library for ESP8266 WiFi microcontroller
-  #include "DHT.h"                // Library for DHT22 Temperature and Humidity sensor
+  #include "DHT.h"                  // Library for DHT22 Temperature and Humidity sensor
   #include <Wire.h>                 // Library for I2C Communication
   #include <SFE_BMP180.h>           // Library for BMP180 Pressure and Temperature sensor
   #include <Adafruit_Sensor.h>
@@ -34,7 +34,7 @@
   long Last_Publish_Time = 0;
 
 // ***** WiFi & Server Info *****
-  #define MQTT_Server "192.168.0.23"
+  #define MQTT_Server "192.168.0.37"
   const char* ssid = "Excal-AS-RC";
   const char* WiFi_Password = "6677889900";
   const char* Node_Type = "RIOT2";
@@ -166,7 +166,7 @@ int read_BME280()
   Serial.print(Humidity);
   Serial.print(" %, ");
   
-  Pressure = bme.readPressure() / 10.0F;  // Convert to kPa
+  Pressure = bme.readPressure()/1000.0F;  // Convert to kPa
   Serial.print("Pressure = ");
   Serial.print(Pressure);
   Serial.println(" kPa");
@@ -177,7 +177,7 @@ int read_BME280()
 //  ***** Read the Temperature and Humidity from the DHT22 sensor over a serial digital I/O port *****
 int read_DHT22()
 {
-  Serial.print("-> DHT22: Reading Temperature and Humidity");
+  Serial.println("-> DHT22: Reading Temperature and Humidity");
   
   // Note Reading temperature or humidity takes between .25 - 2 seconds
   Humidity = dht.readHumidity();        // Relative Humidity in %

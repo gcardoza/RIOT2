@@ -34,7 +34,7 @@
   long Last_Publish_Time = 0;
 
 // ***** WiFi & Server Info *****
-  #define MQTT_Server "192.168.0.23"
+  #define MQTT_Server "192.168.0.44"
   const char* ssid = "Excal-AS-RC";
   const char* WiFi_Password = "6677889900";
   const char* Node_Type = "RIOT2";
@@ -177,7 +177,7 @@ int read_BME280()
 //  ***** Read the Temperature and Humidity from the DHT22 sensor over a serial digital I/O port *****
 int read_DHT22()
 {
-  Serial.print("-> DHT22: Reading Temperature and Humidity");
+  Serial.println("-> DHT22: Reading Temperature and Humidity");
   
   // Note Reading temperature or humidity takes between .25 - 2 seconds
   Humidity = dht.readHumidity();        // Relative Humidity in %

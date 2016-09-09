@@ -11,12 +11,12 @@
 //    Analog (0-1V) Moisture Sensor
 //    Digital input 1 and 2
 
-  const char* Code_Version = " 1.0i";
+  const char* Code_Version = " 1.0j";
 
 // ***** Include header files *****
   #include <PubSubClient.h>         // Library for MQTT Pub/Sub functions
   #include <ESP8266WiFi.h>          // Library for ESP8266 WiFi microcontroller
-  #include "DHT.h"                // Library for DHT22 Temperature and Humidity sensor
+  #include "DHT.h"                  // Library for DHT22 Temperature and Humidity sensor
   #include <Wire.h>                 // Library for I2C Communication
   #include <SFE_BMP180.h>           // Library for BMP180 Pressure and Temperature sensor
   #include <Adafruit_Sensor.h>
@@ -34,11 +34,11 @@
   long Last_Publish_Time = 0;
 
 // ***** WiFi & Server Info *****
-  #define MQTT_Server "192.168.0.23"
+  #define MQTT_Server "192.168.0.37"
   const char* ssid = "Excal-AS-RC";
   const char* WiFi_Password = "6677889900";
   const char* Node_Type = "RIOT2";
-  String Node_Id = "RIOT2-";
+  char Node_Id[30];
 
 // ***** MQTT pub/sub service info *****
   const char* Sensor_Topic = "/RIOT2/SensorData";
@@ -154,19 +154,22 @@ void loop()
 //  ***** Read the Temperature, Humidity and Pressure from the BME280 over I2C *****
 int read_BME280()
 {
-  Serial.print("-> BME280: Reading Temperature, Humidity, and Pressure");
+  Serial.println("-> BME280: Reading Temperature, Humidity, and Pressure");
 
   Temperature = bme.readTemperature();
+  Pressure = bme.readPressure()/1000.0F;  // Convert to kPa
+  Humidity = bme.readHumidity();
+  
   Serial.print("  -> Temperature = ");
   Serial.print(Temperature);
   Serial.print(" *C, ");
 
-  Humidity = bme.readHumidity();
+
   Serial.print("Humidity = ");
   Serial.print(Humidity);
   Serial.print(" %, ");
   
-  Pressure = bme.readPressure() / 10.0F;  // Convert to kPa
+
   Serial.print("Pressure = ");
   Serial.print(Pressure);
   Serial.println(" kPa");
@@ -177,7 +180,7 @@ int read_BME280()
 //  ***** Read the Temperature and Humidity from the DHT22 sensor over a serial digital I/O port *****
 int read_DHT22()
 {
-  Serial.print("-> DHT22: Reading Temperature and Humidity");
+  Serial.println("-> DHT22: Reading Temperature and Humidity");
   
   // Note Reading temperature or humidity takes between .25 - 2 seconds
   Humidity = dht.readHumidity();        // Relative Humidity in %
@@ -285,6 +288,9 @@ void read_Analog_Digital()
 // ***** Connect to the WiFi Network and establish Node Name *****
 void setup_wifi()
 {
+  char temp_b[10];  // *?* temporary buffer for mac address 
+  uint8_t mac[6];
+    
   delay(10);
   // We start by connecting to a WiFi network
   Serial.print("  -> Connecting to ");
@@ -301,10 +307,16 @@ void setup_wifi()
   Serial.println("Connected");
   
   // Create Node ID = Node_Type-MAC Address
-  uint8_t mac[6];
   WiFi.macAddress(mac);
-  Node_Id += macToStr(mac);
 
+  strcpy(Node_Id, Node_Type);
+  strcat(Node_Id, "-");
+  for (int i = 0; i < 6; ++i) 
+  {
+    if (i<5) sprintf(temp_b, "%02x:", mac[i]);
+    else  sprintf(temp_b, "%02x", mac[i]);
+    strcat(Node_Id, temp_b);
+  }
   Serial.print("  -> IP address: ");
   Serial.println(WiFi.localIP());
   Serial.print("  -> Node ID: ");
@@ -342,7 +354,7 @@ void reconnect()
     Serial.print("\n  -> Attempting MQTT connection...");
     
     // Attempt to connect to the MQTT server
-    if (client.connect(Node_Id.c_str())) 
+    if (client.connect(Node_Id)) 
     {
       Serial.println("connected");
       
@@ -362,21 +374,6 @@ void reconnect()
   }
 }
 
-// ***** Generate a string from the ESP8266's MAC address *****
-String macToStr(const uint8_t* mac)
-{
-  String result;
-
-  for (int i = 0; i < 6; ++i) 
-  {
-    result += String(mac[i], 16);
-    if (i < 5){
-      result += ':';
-    }
-  }
-  return(result);
-}
-
 // ***** Format RIOT2 Sensor Data message for BIOT2 Base Station *****
 void Publish_Sensor_Data()
 {
@@ -393,7 +390,7 @@ void Publish_Sensor_Data()
   dtostrf(Update_Sequence, 6, 0, SE_b);
   
   strcpy(Sensor_Data, "NI,\0");
-  strncat(Sensor_Data, Node_Id.c_str(), 23);
+  strncat(Sensor_Data, Node_Id, 23);
   strcat(Sensor_Data, ",SW,");
   strncat(Sensor_Data, Code_Version, 5);
   strcat(Sensor_Data, ",TE,");
