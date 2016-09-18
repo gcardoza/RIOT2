@@ -35,7 +35,7 @@
   long Last_Publish_Time = 0;
 
 // ***** WiFi & Server Info *****
-  #define MQTT_Server "192.168.0.44"
+  #define MQTT_Server "192.168.0.37"
   const char* ssid = "Excal-AS-RC";
   const char* WiFi_Password = "6677889900";
   const char* Node_Type = "RIOT2";
@@ -51,6 +51,7 @@
   
 // ***** Set BME280 Temperature, Humidity and Pressure Variables *****
   #define SEALEVELPRESSURE_HPA (1013.25)
+  int Home_Altitude = 317;        // Altitude to compensate for Barometric Pressure 
   Adafruit_BME280 bme;            // I2C
   boolean BME280_Present = true;  // set the default to the board being present
   
@@ -175,7 +176,7 @@ int read_BME280()
   Altitude = bme.readAltitude(SEALEVELPRESSURE_HPA);
  
   // Correct Pressure based on current altitude read bythe BME280
-  Correction_Factor = (760-(Altitude*3.281*0.026))/760;  // Corrects Pressure to Sea Level
+  Correction_Factor = (760-(Home_Altitude*3.281*0.026))/760;  // Corrects Pressure to Sea Level
   Pressure = P/Correction_Factor;
   
   Serial.print("  -> Temp = ");
