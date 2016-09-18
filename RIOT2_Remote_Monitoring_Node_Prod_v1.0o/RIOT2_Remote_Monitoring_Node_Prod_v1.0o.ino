@@ -1,7 +1,7 @@
 //  Project:  RIOT2 - Remote IOT Node for monitoring Weather - Temperature, Humidity, Barometric Pressure
 //  Author:   Geofrey Cardoza
 //  Baseline: August 31st, 2016
-//  Revision: September 12th, 2016
+//  Revision: September 18th, 2016
 //
 //  Hardware Configuration:
 //    AdaFruit Feather Huzzah with ESP8266 Micro-controller
@@ -12,7 +12,7 @@
 //    Analog (0-1V) Moisture Sensor
 //    Digital input 1 and 2
 
-  const char* Code_Version = " 1.0n";
+  const char* Code_Version = " 1.0o";
 
 // ***** Include header files *****
   #include <PubSubClient.h>         // Library for MQTT Pub/Sub functions
@@ -51,7 +51,7 @@
   
 // ***** Set BME280 Temperature, Humidity and Pressure Variables *****
   #define SEALEVELPRESSURE_HPA (1013.25)
-  int Home_Altitude = 317;        // Altitude to compensate for Barometric Pressure 
+  int Home_Altitude = 317;        // Altitude in meters to compensate for Barometric Pressure 
   Adafruit_BME280 bme;            // I2C
   boolean BME280_Present = true;  // set the default to the board being present
   
@@ -61,7 +61,6 @@
   DHT dht(DHT22_Pin, DHT_Type);
   
 // ***** Set BMP180 Pressure Sensor Variables *****
-  #define ALTITUDE 260.0          // Altitude at Home - 4 Peace Court Caledon ON, Canada
   SFE_BMP180 myBMP180;
  
 // ***** Set Analog and Digital Input Variables *****
@@ -244,7 +243,7 @@ int read_BMP180()
         if (status != 0)
         {
           //Correct pressure to sea level & convert to kPa
-          Pressure = myBMP180.sealevel(P,ALTITUDE)/10;
+          Pressure = myBMP180.sealevel(P,Home_Altitude)/10;
 
           Serial.print("Barometric Pressure: ");
           Serial.print(Pressure);
