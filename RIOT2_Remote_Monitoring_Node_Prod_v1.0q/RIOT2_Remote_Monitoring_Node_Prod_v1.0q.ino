@@ -1,17 +1,18 @@
 //  Project:  RIOT2 - Remote IOT Node for monitoring Weather - Temperature, Humidity, Barometric Pressure
 //  Author:   Geofrey Cardoza
 //  Baseline: August 31st, 2016
-//  Revision: September 3rd, 2016
+//  Revision: September 20th, 2016
 //
 //  Hardware Configuration:
-//    AdaFruit Feather Huzzah with ESP8266 Microcontroller
+//    AdaFruit Feather Huzzah with ESP8266 Micro-controller
 //      - WiFi & MQTT messaging interface
-//    DHT22 for Temperature and Pressure
-//    BMP180 for Pressure
+//    BME280 for Temperature, Humidity and Pressure (Primary)
+//    DHT22 for Temperature and Pressure (Secondary)
+//    BMP180 for Pressure (Secondary)
 //    Analog (0-1V) Moisture Sensor
 //    Digital input 1 and 2
 
-  const char* Code_Version = " 1.0j";
+  const char* Code_Version = " 1.0p";
 
 // ***** Include header files *****
   #include <PubSubClient.h>         // Library for MQTT Pub/Sub functions
@@ -23,55 +24,60 @@
   #include <Adafruit_BME280.h>
   
 // ***** Declare global variables for the RIOT2 Node
-  int   Update_Interval = 10000;           // set default Data Update frequence 20 seconds (BIOT can change it)
-  float Temperature, Humidity, Pressure, Analog_1;
+  int   Update_Interval = 60000;           // set default Update interval to 60 sec. (can be changed)
+  float Temperature, Humidity, Pressure, Altitude, Analog_1;
   float  Digital_1, Digital_2;
   unsigned long Update_Sequence = 0;      // Update sequence number to base
   char Sensor_Data[150];                  // Buffer to hold formatted sensor data payload
-
+  
 // ***** Define variables to track how long the program has been running *****
   long Current_Time;
   long Last_Publish_Time = 0;
 
 // ***** WiFi & Server Info *****
-  #define MQTT_Server "192.168.0.37"
+  #define MQTT_Server "192.168.0.120"
   const char* ssid = "Excal-AS-RC";
   const char* WiFi_Password = "6677889900";
   const char* Node_Type = "RIOT2";
   char Node_Id[30];
 
 // ***** MQTT pub/sub service info *****
-  const char* Sensor_Topic = "/RIOT2/SensorData";
-  const char* Config_Topic = "/RIOT2/Config";
+  const char* Sensor_Topic = "/RioT/SensorData";
+  const char* Control_Topic = "/Control/RioT";
+  const char* MQTT_Id = "biot";
+  const char* MQTT_Pw = "excaliber";
   WiFiClient espClient;
   PubSubClient client(espClient);
-
+  char Control_Command[10];               // Inbound subscribed control message command
+  int  Control_Data;               // Inbound subscribed control message data
+  
 // ***** Set BME280 Temperature, Humidity and Pressure Variables *****
   #define SEALEVELPRESSURE_HPA (1013.25)
-  Adafruit_BME280 bme; // I2C
+  int Home_Altitude = 317;        // Altitude in meters to compensate for Barometric Pressure 
+  Adafruit_BME280 bme;            // I2C
   boolean BME280_Present = true;  // set the default to the board being present
   
 // ***** Set DHT22 Temp and Pressure Variables *****
-  #define DHT_Type DHT22   // DHT 22  (AM2302), AM2321
-  #define DHT22_Pin 2     // The digital IO pin the DHT22 is connected to
+  #define DHT_Type DHT22          // DHT 22  (AM2302), AM2321
+  #define DHT22_Pin 2             // The digital IO pin the DHT22 is connected to
   DHT dht(DHT22_Pin, DHT_Type);
   
 // ***** Set BMP180 Pressure Sensor Variables *****
-  #define ALTITUDE 260.0 // Altitude at Home - 4 Peace Court Caledon ON, Canada
   SFE_BMP180 myBMP180;
-
+ 
 // ***** Set Analog and Digital Input Variables *****
-  #define Analog1_Pin  0    // Analog input 1 pin
-  #define Digital1_Pin 12   // Digital input 1 pin
-  #define Digital2_Pin 13  // Digital input 2 pin
+  #define Analog1_Pin  0          // Analog input 1 pin
+  #define Digital1_Pin 12         // Digital input 1 pin
+  #define Digital2_Pin 13         // Digital input 2 pin
 
 
 // ********** INITIALIZE ALL COMPONENTS OF THE SYSTEM **********
 void setup(void)
 {
-  // Start the serial port for debugging vi Arduino Serial Monitor
+  // ***** Start the serial port for debugging vi Arduino Serial Monitor *****
   Serial.begin(115200);
-  delay (1000); //Pause to allow serial port to initialize
+  delay(1000); //Pause to allow serial port to initialize
+  
   Serial.print("\n***** STARTING RIOT2 - Code Version: ");
   Serial.print(Code_Version);
   Serial.println(" *****");
@@ -84,8 +90,10 @@ void setup(void)
   // ***** Configure & Start MQTT Messaging service *****
   Serial.println("-> MQTT: Configuring Messaging Service");
   client.setServer(MQTT_Server, 1883); // Connect to MQTT Server
+  Serial.print("  -> Server Address: ");
+  Serial.println(MQTT_Server);
   client.setCallback(callback);        // Set the callback function when subscribed message arrives 
-  client.subscribe(Config_Topic);      // Subscribe to Config Topic
+  client.subscribe(Control_Topic);      // Subscribe to Control Topic
         
   // ***** Configure Onboard LED and set to Off *****
   Serial.print("-> LED: Configuring Onboard LED and set to off\n");
@@ -116,16 +124,19 @@ void setup(void)
   Serial.print("-> Analog & Digital Input: Configuring A/D and GPIO ports\n");
   pinMode(Digital1_Pin, INPUT_PULLUP);
   pinMode(Digital2_Pin, INPUT_PULLUP);
-  
-  //Wait a bit before starting the main loop
+    
+  //Wait 2 seconds to have sensors stabilize
   delay(2000);
+  
+  //Force a Sensor Reading on the first loop
+  Last_Publish_Time = millis() - Update_Interval;
 }
 
 
 // ********** MAIN PROGRAM LOOP **********
 void loop()
 {
-  // Wait Update Interval prior to Publishing Sensor Data
+  // ***** Wait Update Interval prior to Publishing Sensor Data *****
   Current_Time = millis();    // get current program run=time in ms
   if (Current_Time-Last_Publish_Time > Update_Interval)
   {
@@ -146,7 +157,10 @@ void loop()
 
     // ***** Format Sensor Data Payload and send to BIOT Base
     Publish_Sensor_Data();
+
   }
+  // ***** Check for and Process Subscribed Messages *****
+  client.loop();
 }
 
 // *************** Sub-Routines *********************
@@ -154,26 +168,28 @@ void loop()
 //  ***** Read the Temperature, Humidity and Pressure from the BME280 over I2C *****
 int read_BME280()
 {
+  float P, Correction_Factor;        // Var to adjust altitude correction factor for pressure
   Serial.println("-> BME280: Reading Temperature, Humidity, and Pressure");
 
   Temperature = bme.readTemperature();
-  Pressure = bme.readPressure()/1000.0F;  // Convert to kPa
+  P = bme.readPressure()/(1000.0);                  // Convert to kPa
   Humidity = bme.readHumidity();
+  Altitude = bme.readAltitude(SEALEVELPRESSURE_HPA);
+ 
+  // Correct Pressure based on current altitude read bythe BME280
+  Correction_Factor = (760-(Home_Altitude*3.281*0.026))/760;  // Corrects Pressure to Sea Level
+  Pressure = P/Correction_Factor;
   
-  Serial.print("  -> Temperature = ");
+  Serial.print("  -> Temp = ");
   Serial.print(Temperature);
-  Serial.print(" *C, ");
-
-
-  Serial.print("Humidity = ");
+  Serial.print(" *C, Hum = ");
   Serial.print(Humidity);
-  Serial.print(" %, ");
-  
-
-  Serial.print("Pressure = ");
+  Serial.print(" %, Pres = ");
   Serial.print(Pressure);
-  Serial.println(" kPa");
-
+  Serial.print(" kPa, Alt = ");
+  Serial.print(Altitude);
+  Serial.print(" m, Correction Factor = ");
+  Serial.println(Correction_Factor);
   return(0);
 }
 
@@ -228,7 +244,8 @@ int read_BMP180()
         status = myBMP180.getPressure(P,T);
         if (status != 0)
         {
-          Pressure = myBMP180.sealevel(P,ALTITUDE)/10;  //Convert Pressure to kPa
+          //Correct pressure to sea level & convert to kPa
+          Pressure = myBMP180.sealevel(P,Home_Altitude)/10;
 
           Serial.print("Barometric Pressure: ");
           Serial.print(Pressure);
@@ -288,11 +305,10 @@ void read_Analog_Digital()
 // ***** Connect to the WiFi Network and establish Node Name *****
 void setup_wifi()
 {
-  char temp_b[50];  // *?* temporary buffer for mac address 
   uint8_t mac[6];
     
   delay(10);
-  // We start by connecting to a WiFi network
+  // Connect to the WiFi network
   Serial.print("  -> Connecting to ");
   Serial.print(ssid);
   Serial.print(" ");
@@ -308,33 +324,26 @@ void setup_wifi()
   
   // Create Node ID = Node_Type-MAC Address
   WiFi.macAddress(mac);
-  sprintf(temp_b, "%5s-%02x:%02x:%02x:%02x:%02x:%02x",Node_Type, mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-  Serial.println(temp_b);
-  
-  strcpy(Node_Id, Node_Type);
-  strcat(Node_Id, "-");
-  for (int i = 0; i < 6; ++i) 
-  {
-    if (i<5) sprintf(temp_b, "%02x:", mac[i]);
-    else  sprintf(temp_b, "%02x", mac[i]);
-    strcat(Node_Id, temp_b);
-  }
-  Serial.print("  -> IP address: ");
+  sprintf(Node_Id, "%5s-%02x:%02x:%02x:%02x:%02x:%02x",Node_Type, mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+
+  Serial.print("  -> Node IP: ");
   Serial.println(WiFi.localIP());
   Serial.print("  -> Node ID: ");
   Serial.println(Node_Id);
 }
 
-// ***** Process Subscribed message received from BIOT2 *****
+// ***** Process Subscribed message received from BIOT *****
 void callback(char* topic, byte* payload, unsigned int length)
-{  char message(150);
+{  
+  char data_b[100];
+  int i, j;
   
-  Serial.println("***** Subscribed Topic Message Arrived *****");
-  Serial.print ("  -> Topic: ");
+  Serial.println("\n***** Subscribed Topic Message Arrived *****");
+  Serial.print ("-> Topic: ");
   Serial.print(topic);
   Serial.print(", Message Length: ");
   Serial.println(length);
-  Serial.print("  -> Message: ");
+  Serial.print("-> Message: ");
   for (int i = 0; i < length; i++) Serial.print((char)payload[i]);
   Serial.println();
 
@@ -343,11 +352,50 @@ void callback(char* topic, byte* payload, unsigned int length)
   delay(500);
   digitalWrite(BUILTIN_LED, HIGH);  // Turn the LED off
 
-  // *?* Process Subscribed Config Message here
+  // ***** Process Inbound Command *****
+  Serial.print("-> Processing Inbound Control Command");
+  if(length ==7)
+  {
+    sprintf(Control_Command, "%c%c%c\0", payload[0], payload[1], payload[2]);
+    sprintf(data_b, "%c%c%c%c\0", payload[3], payload[4], payload[5], payload[6]);
 
+    Control_Data = atoi(data_b);
+    Serial.print("  -> Control Command = ");
+    Serial.print(Control_Command);
+    Serial.print(" , Control Data = ");
+    Serial.println(Control_Data);
+
+    // ** 1. Change Sensor Data Update Interval **
+    if(!strcmp(Control_Command, "UF:") && Control_Data >= 5)
+    {
+      Serial.print("  -> Changing Sersor Data Update Interval to ");
+      Serial.print(Control_Data);
+      Serial.println(" seconds");
+      Update_Interval = Control_Data *1000;    // Set Sensor Data Update Interval
+      return;
+    }
+
+    // ** 2. Force Node to Publish Sensor Data NOW **
+    if(!strcmp(Control_Command, "UN:") && Control_Data == 9999)
+    {
+      Serial.print("  -> Forcing Node to Publish Sensor Data NOW");
+      Last_Publish_Time = millis() - Update_Interval;
+      return;
+    }
+    
+    // ** 3. Force Node to Reset the Update Sequence number to 0 **
+    if(!strcmp(Control_Command, "RS:") && Control_Data == 9999)
+    {
+      Serial.print("  -> Forcing Node to Reset Sequence Number to 0");
+      Update_Sequence = 0;
+      return;
+    }
+
+  }
+  else Serial.println("  -> Invalid command received");
 }
 
-// ***** Reconnect to MQTT service and subscribe to Config Topic *****
+// ***** Reconnect to MQTT service and subscribe to Control Topic *****
 void reconnect()
 {
   // Loop until we're reconnected
@@ -356,19 +404,18 @@ void reconnect()
     Serial.print("\n  -> Attempting MQTT connection...");
     
     // Attempt to connect to the MQTT server
-    if (client.connect(Node_Id)) 
+    if (client.connect(Node_Id, MQTT_Id, MQTT_Pw)) 
     {
       Serial.println("connected");
       
       // Resubscribe to the MQTT Configuration topic
-      Serial.print("  -> Subscribing to MQTT Config.Topic service\n");
-      client.subscribe(Config_Topic);
+      Serial.print("  -> Subscribing to MQTT Control Topic service\n");
+      client.subscribe(Control_Topic);
     } 
     else 
     {
       Serial.print("failed, rc=");
       Serial.print(client.state());
-      
       Serial.println(" try again in 5 seconds");
       // Wait 5 seconds before retrying
       delay(5000);
@@ -401,14 +448,15 @@ void Publish_Sensor_Data()
   strncat(Sensor_Data, HU_b, 5);
   strcat(Sensor_Data,  ",PR,");
   strncat(Sensor_Data, PR_b, 5);
+  strcat(Sensor_Data, ",SE,");
+  strncat(Sensor_Data, SE_b, 6);
   strcat(Sensor_Data, ",A1,");
   strncat(Sensor_Data, A1_b, 4);
   strcat(Sensor_Data, ",D1,");
   strncat(Sensor_Data, D1_b, 1);  
   strcat(Sensor_Data, ",D2,");
   strncat(Sensor_Data, D2_b, 1); 
-  strcat(Sensor_Data, ",SE,");
-  strncat(Sensor_Data, SE_b, 6);
+
   
   // Ensure a connection exists with the MQTT server on the Pi
   Serial.print("-> Checking connection to MQTT server...");
